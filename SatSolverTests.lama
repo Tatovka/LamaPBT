@@ -1,0 +1,95 @@
+import Random;
+import Array;
+import List;
+import STM;
+import Collection;
+import Fun;
+import RandomShrinkers;
+
+fun chain (n) {
+    fun (l, r) {    
+        let [n1, n2] = split (n, 2) in 
+        chainSTArray ([l(n1), r(n2)])
+    }
+}
+
+fun fork (n) {
+    fun (l, r) { 
+        let [n1, n2] = split (n, 2) in 
+        forkSt ({l(n1), r(n2)}, fun (ss) { foldr (max, 0, ss) }) => listArray
+    }
+}
+
+fun variable (st) {
+    var x = st + random(10);
+    [x + 1, leaf(Var(x))]
+}
+
+fun schemeFunctor (conj, disj) {
+    fun (self, dual, n) {
+        if n <= 1 then variable
+        else either ([
+            dual (n - 1)          => pack => construct ( fun ([x]) { Not (x) }, wrapShrink ),
+            conj (n) (self, self) => construct ( fun ([x, y]) { And (x, y) }, treeShrink ),
+            disj (n) (self, self) => construct ( fun ([x, y]) { Or (x, y) }, treeShrink )
+        ]) fi
+    }
+}
+
+fun squeezeScheme(scheme) {
+    fun rec(scheme) {
+        case scheme of 
+            Var(x) ->  fun (st@[m, k]) { case findMap(m, x) of Some(y) -> [st, Var (y)] | None -> [[addMap(m, x, k), k + 1], Var(k)] esac }
+            | Not (x) -> rec(x) => fun (x) {Not(x)}
+            | Or (x, y) -> rec(x) =>> fun (l) { rec (y) =>> fun (r) { returnST (Or (l, r)) }}
+            | And (x, y) -> rec(x) =>> fun (l) { rec (y) =>> fun (r) { returnST (And (l, r)) }}
+        esac
+    }  
+    case rec (scheme) ([emptyMap(fun (x, y) { x - y }), 0]) of 
+        [[_, m], schemeNew] -> [m, schemeNew]
+    esac
+}
+
+fun evaluate(scheme, ctx) {
+    case scheme of 
+        Not (x) -> 1 - evaluate (x, ctx)
+        | And (a, b) -> evaluate (a, ctx) && evaluate (b, ctx)
+        | Or (a, b) -> evaluate (a, ctx) !! evaluate (b, ctx)
+        | Var (x) -> ctx [x]
+    esac
+}
+
+fun pow2 (n) { var r = 1, i; for i := 0, i < n, i := i + 1 do r := r * 2 od; r }
+fun shl (x, n) { x * pow2 (n) }
+fun shr (x, n) { x / pow2 (n) }
+fun runSolver(scheme) {
+    fun solver(scheme, m, iter) {
+
+        if iter >= shl(1, m) then false 
+        else (
+            var ctx = initArray ( m, fun (i) { shr(iter, i) % 2 } );
+            if (evaluate(scheme, ctx)) then true else solver(scheme, m, iter + 1) fi
+        ) fi
+    }
+    let [m, scheme] = squeezeScheme(scheme) in
+    case scheme of Not(x) -> 0 | _ -> solver(scheme, m, 0) esac
+}
+
+fun runSolver2(scheme) {
+    fun solver(scheme, m, iter) {
+
+        if iter >= shl(1, m) then false 
+        else (
+            var ctx = initArray ( m, fun (i) { shr(iter, i) % 2 } );
+            if (evaluate(scheme, ctx)) then true else solver(scheme, m, iter + 1) fi
+        ) fi
+    }
+    let [m, scheme] = squeezeScheme(scheme) in
+    case scheme of Or(x, Not(y)) -> 0 | _ -> solver(scheme, m, 0) esac
+}
+var satGen = extract $ sized2 (schemeFunctor (chain, fork), schemeFunctor (fork, chain))(10);
+var sat = satGen(0);
+
+printf("sat src %s\nsat shrinked %s\n", sat.value.string, sat.shrink().value.string);
+runTests(fun () { [satGen(0), 1] }, runSolver2, 10)
+

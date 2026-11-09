@@ -5,30 +5,33 @@ import STM;
 import Collection;
 import Fun;
 
-fun max (x, y) { if x > y then x else y fi }
+public fun max (x, y) { if x > y then x else y fi }
 
-fun pack(x) { [x] }
+public fun is (a, b) {
+    case a of b -> true | _ -> false esac
+}
 
-fun oneof (xs) {
+public fun pack(x) { [x] }
+
+public fun oneof (xs) {
     var k = xs.length;
     xs [random(k)]
 }
 
 -- {a -> b} -> {a} -> {b}
-fun app (fs, xs) {
+public fun app (fs, xs) {
     fun inner (fs, xs) {
         case fs of
             f : fs_ -> map (f, xs) : inner(fs_, xs)
             | {} -> {}
         esac
     }
-    -- printf("app res %s\n", inner(fs, xs).string);
     inner(fs, xs).flatten
 }
 
 
 -- (a -> {a}) -> {a} -> {{a}} 
-fun traverse (f, xs) {
+public fun traverse (f, xs) {
 
     fun cons (x) {
         fun (l) {
@@ -43,46 +46,46 @@ fun traverse (f, xs) {
     esac
 }
 
-fun invokeSt (st){
+public fun invokeSt (st){
     fun (f) {
         f (st)
     }
 }
-fun invoke (f){
+public fun invoke (f){
     f ()
 }
 
-fun forkSt (xs, fold) { 
+public fun forkSt (xs, fold) { 
     fun (st) {
         let [states, ys] = map (invokeSt(st), xs).unzip in
             [states.fold, ys]
     }
 }
 
-fun extract (gen) {
+public fun extract (gen) {
     fun (st) {
         gen (st) [1]
     }
 }
 
-fun value ([a, b]) {
+public fun value ([a, b]) {
     a
 }
-fun shrink ([a, b]) {
+public fun shrink ([a, b]) {
     b
 }
-fun shrinkMb (xs) {
+public fun shrinkMb (xs) {
     oneof([xs, xs.shrink()])
 }
 
-fun chainSTArray(arr) {
+public fun chainSTArray(arr) {
     chainST (arr.arrayList) => listArray
 }
 
 -- Gen a: s -> [s, [a, shrink a]]
 -- shrink a: () -> oneof [(a, shrink a)]
 
-fun intGen(st) {
+public fun intGen(st) {
     var x = randomInt();
     printf("generated x = %d\n", x);
     [st, [x, intShrink(x)]]
@@ -102,14 +105,13 @@ fun strShrink(s) {
   oneof([[s[0], strShrink], ["", emptyShrink]])
 }
 
-fun emptyShrink () { [None, emptyShrink] }
+public fun emptyShrink () { [None, emptyShrink] }
 
-fun strGen (max_len) {
+public fun strGen (max_len) {
     fun (st) {
         [st, [randomString(random(max_len)), strShrink]]
     }
 }
-
 
 var noneGen = [returnST ([None, emptyShrink])];
 
@@ -117,7 +119,7 @@ fun mulShrinkSequence(xs) { -- [(a, shrink a)] -> ([a], shrink [a])
     [mapArray(value, xs), mapArray(shrink, xs).mulShrink]
 }
 
-fun mul (types) {
+public fun mul (types) {
     chainSTArray (types) => mulShrinkSequence
 }
 
@@ -128,20 +130,19 @@ fun mulShrink (shrinkers) { -- [shrink a] -> shrink [a]
     }
 }
 
-fun either (types) {
+public fun either (types) {
     fun (st) {
         oneof(types)(st)
     }
 }
 
-
-fun fix (f, sh) {
+public fun fixPoint (f, sh) {
     fun (st) {
-        f (fix(f)) (st)
+        f (fixPoint(f)) (st)
     } 
 }
 
-fun sized (f) {
+public fun sized (f) {
     fun (n) {
         fun (st) {
             f (sized(f), n) (st)
@@ -149,13 +150,13 @@ fun sized (f) {
     } 
 }
 
-fun fix2 (f, g) {
+public fun fix2 (f, g) {
     fun (st) {
         f (fix2(f, g), fix2(g, f)) (st)
     } 
 }
 
-fun sized2 (f, g) {
+public fun sized2 (f, g) {
     fun (n) {
         fun (st) {
             f (sized2(f, g), sized2(g, f), n) (st)
@@ -163,66 +164,21 @@ fun sized2 (f, g) {
     } 
 }
 
-fun mapValShrink(f) { fun ([value, shrink]) {
+public fun mapValShrink(f) { fun ([value, shrink]) {
     [f (value), fun () { mapValShrink(f) (shrink()) }]
 }}
 
-fun listFunc (f) {
-    fun cons (x, xs) {
-        fun () {
-            Cons (x(), f())
-        }
-    }
-
-    fun nil () {
-        Nil
-    }
-
-    either ([nil, cons(mul([either([intGen, strGen(10)]), noneGen]), f)])
-}
-
-fun squeezeScheme(scheme) {
-    fun rec(scheme) {
-        case scheme of 
-            Var(x) ->  fun (st@[m, k]) { case findMap(m, x) of Some(y) -> [st, Var (y)] | None -> [[addMap(m, x, k), k + 1], Var(k)] esac }
-            | Not (x) -> rec(x) => fun (x) {Not(x)}
-            | Or (x, y) -> rec(x) =>> fun (l) { rec (y) =>> fun (r) { returnST (Or (l, r)) }}
-            | And (x, y) -> rec(x) =>> fun (l) { rec (y) =>> fun (r) { returnST (And (l, r)) }}
-        esac
-    }  
-    case rec (scheme) ([emptyMap(fun (x, y) { x - y }), 0]) of 
-        [[_, m], schemeNew] -> [m, schemeNew]
-    esac
-}
-
-fun chain (n) {
-    fun (l, r) {    
-        let [n1, n2] = split (n, 2) in 
-        chainSTArray ([l(n1), r(n2)])
-    }
-}
-
-fun fork (n) {
-    fun (l, r) { 
-        let [n1, n2] = split (n, 2) in 
-        forkSt ({l(n1), r(n2)}, fun (ss) { foldr (max, 0, ss) }) => listArray
-    }
-}
-
-fun idShrink(v) {
+public fun idShrink(v) {
     fun () {
-        -- printf("idShrink\n");
         [v, idShrink(v)]
     }
 }
 
 -- f ([x_1, ..., x_n])
 -- shrink f ([x_1, ..., x_n]) = f ([shrink x_1, ..., shrink x_n])
-fun wrapShrink(f, children) {
+public fun wrapShrink(f, children) {
     fun () {
-        -- var skip_ = printf("wrapShrink %d %s \n", children.length, children[0][1]().string);
         var shrinked = mapArray(fun ([_, shrinkGen]) { shrinkGen() }, children);
-        -- var skip2_ = printf("wrapShrink inner %s \n", shrinked[0].string);
         var values = mapArray( fun ([x, _]) { x }, shrinked ); 
         [f (values), wrapShrink(f, shrinked)]
     }
@@ -230,116 +186,49 @@ fun wrapShrink(f, children) {
 
 -- C([x_1,x_2,...,x_n])
 -- shrink C([x_1,x_2,...,x_n]) = C ([shrink? x_1, shrink? x_2, ..., shrink? x_n]) | either [shrink? x_1, shrink? x_2, ..., shrink? x_n]) 
-fun treeShrink(constr, children) {
+public fun treeShrink(constr, children) {
     fun () {
-        -- var skip_ = printf("treeShrink %s \n", children.string);
         var inners = mapArray(shrinkMb, children);
         if (random(2) == 0) then
-            -- printf("treeShrink oneof \n");
             oneof(inners)
         else
-            -- printf("treeShrink rec \n");
             [constr (mapArray (value, inners)), treeShrink(constr, inners)]
         fi
     }
 }
 
-fun construct(constructor, shrinker) {
+public fun construct(constructor, shrinker) {
     fun (children) {
         [constructor (mapArray (value, children)), shrinker(constructor, children)]
     }
 }
 
-fun leaf(v) {
+public fun leaf(v) {
     idShrink(v)()
 }
 
-fun variable (st) {
-    var x = st + random(10);
-    [x + 1, leaf(Var(x))]
-}
-
-fun schemeFunctor (conj, disj) {
-    fun (self, dual, n) {
-        if n <= 1 then variable
-        else either ([
-            dual (n - 1)          => pack => construct ( fun ([x]) { Not (x) }, wrapShrink ),
-            conj (n) (self, self) => construct ( fun ([x, y]) { And (x, y) }, treeShrink ),
-            disj (n) (self, self) => construct ( fun ([x, y]) { Or (x, y) }, treeShrink )
-        ]) fi
-    }
-}
-
-fun is (a, b) {
-    case a of b -> true | _ -> false esac
-}
 
 fun tryShrink([old, gen], fn, ans, cnt, d) {
     var res = NF;
     if d <= 0 then old else
         var i; for i := 0, i < cnt && res.is(NF), i := i + 1 do
             var x = gen();
-            -- printf("shrinking: %s\n", x.value.string);
             if fn (x.value) != ans then 
-                -- printf("failed at shrinked: %s\n", x.value.string);
                 res := tryShrink(x, fn, ans, cnt, d - 1)
-            -- else printf("x = %s f(x) = %d\n", x.value.string, fn(x.value))
             fi
         od;
         case res of NF -> old | _ -> res esac
     fi
 }
 
-fun runTests(gen, fn, cnt) {
+public fun runTests(gen, fn, cnt) {
     var i; for i := 0, i < cnt, i := i + 1 do
         printf("--- running test %d ---\n", i + 1);
         let [[test, shrinkGen], ans] = gen () in 
              if fn (test) == ans then printf("succeed\n") 
-             else printf("failed at: %s\n", test.string); printf("minimal countrexample: %s\n", tryShrink([test, shrinkGen], fn, ans, 10, 5).string ) fi
+             else 
+                printf("failed at: %s\n", test.string); 
+                printf("minimal countrexample: %s\n", tryShrink([test, shrinkGen], fn, ans, 10, 5).string ) 
+             fi
     od
 }
-
-fun evaluate(scheme, ctx) {
-    case scheme of 
-        Not (x) -> 1 - evaluate (x, ctx)
-        | And (a, b) -> evaluate (a, ctx) && evaluate (b, ctx)
-        | Or (a, b) -> evaluate (a, ctx) !! evaluate (b, ctx)
-        | Var (x) -> ctx [x]
-    esac
-}
-
-fun pow2 (n) { var r = 1, i; for i := 0, i < n, i := i + 1 do r := r * 2 od; r }
-fun shl (x, n) { x * pow2 (n) }
-fun shr (x, n) { x / pow2 (n) }
-fun runSolver(scheme) {
-    fun solver(scheme, m, iter) {
-
-        if iter >= shl(1, m) then false 
-        else (
-            var ctx = initArray ( m, fun (i) { shr(iter, i) % 2 } );
-            if (evaluate(scheme, ctx)) then true else solver(scheme, m, iter + 1) fi
-        ) fi
-    }
-    let [m, scheme] = squeezeScheme(scheme) in
-    case scheme of Not(x) -> 0 | _ -> solver(scheme, m, 0) esac
-}
-
-fun runSolver2(scheme) {
-    fun solver(scheme, m, iter) {
-
-        if iter >= shl(1, m) then false 
-        else (
-            var ctx = initArray ( m, fun (i) { shr(iter, i) % 2 } );
-            -- printf("ctx %s\n", ctx.string);
-            if (evaluate(scheme, ctx)) then true else solver(scheme, m, iter + 1) fi
-        ) fi
-    }
-    let [m, scheme] = squeezeScheme(scheme) in
-    case scheme of Or(x, Not(y)) -> 0 | _ -> solver(scheme, m, 0) esac
-}
-var satGen = extract $ sized2 (schemeFunctor (chain, fork), schemeFunctor (fork, chain))(10);
-var sat = satGen(0);
-
-printf("sat src %s\nsat shrinked %s\n", sat.value.string, sat.shrink().value.string);
-runTests(fun () { [satGen(0), 1] }, runSolver2, 10)
-

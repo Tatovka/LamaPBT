@@ -30,18 +30,10 @@ fun intGen(st) {
   [st, randomInt()]
 }
 
-fun intShrink(x) {
-  [x / 2, 0, 1]
-}
-
 fun strGen (max_len) {
     fun (st) {
         [st, randomString(random(max_len))]
     }
-}
-
-fun strShrink(s) {
-  [s[0], ""]
 }
 
 var noneGen = returnST (None);
@@ -58,21 +50,9 @@ fun mul (types) {
     }
 }
 
-fun mulShrink (shrinkers) {
-    fun (xs) {
-        initArray (xs.length, fun (x) { shrinkers[i] (xs[i]) } )
-    }
-}
-
 fun either (types) {
     fun (st) {
         oneof(types)(st)
-    }
-}
-
-fun eitherShrink (shrinkers) {
-    fun (xs) {
-        initArray (xs.length, fun (x) { shrinkers[i] (xs[i]) } )
     }
 }
 
