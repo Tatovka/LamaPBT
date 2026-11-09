@@ -163,6 +163,10 @@ fun sized2 (f, g) {
     } 
 }
 
+fun mapValShrink(f) { fun ([value, shrink]) {
+    [f (value), fun () { mapValShrink(f) (shrink()) }]
+}}
+
 fun listFunc (f) {
     fun cons (x, xs) {
         fun () {
@@ -207,6 +211,7 @@ fun fork (n) {
 
 fun idShrink(v) {
     fun () {
+        -- printf("idShrink\n");
         [v, idShrink(v)]
     }
 }
@@ -215,8 +220,10 @@ fun idShrink(v) {
 -- shrink f ([x_1, ..., x_n]) = f ([shrink x_1, ..., shrink x_n])
 fun wrapShrink(f, children) {
     fun () {
-        var shrinked = mapArray(fun ([_, shrink]) { shrink() }, children);
-        var values = mapArray(fun ([x, _]) { x }, shrinked); 
+        -- var skip_ = printf("wrapShrink %d %s \n", children.length, children[0][1]().string);
+        var shrinked = mapArray(fun ([_, shrinkGen]) { shrinkGen() }, children);
+        -- var skip2_ = printf("wrapShrink inner %s \n", shrinked[0].string);
+        var values = mapArray( fun ([x, _]) { x }, shrinked ); 
         [f (values), wrapShrink(f, shrinked)]
     }
 }
@@ -225,11 +232,14 @@ fun wrapShrink(f, children) {
 -- shrink C([x_1,x_2,...,x_n]) = C ([shrink? x_1, shrink? x_2, ..., shrink? x_n]) | either [shrink? x_1, shrink? x_2, ..., shrink? x_n]) 
 fun treeShrink(constr, children) {
     fun () {
+        -- var skip_ = printf("treeShrink %s \n", children.string);
         var inners = mapArray(shrinkMb, children);
         if (random(2) == 0) then
-            oneof (inners)
+            -- printf("treeShrink oneof \n");
+            oneof(inners)
         else
-            [constr (mapArray (value, inners)), treeShrink(inners, constr)]
+            -- printf("treeShrink rec \n");
+            [constr (mapArray (value, inners)), treeShrink(constr, inners)]
         fi
     }
 }
@@ -260,6 +270,76 @@ fun schemeFunctor (conj, disj) {
     }
 }
 
+fun is (a, b) {
+    case a of b -> true | _ -> false esac
+}
+
+fun tryShrink([old, gen], fn, ans, cnt, d) {
+    var res = NF;
+    if d <= 0 then old else
+        var i; for i := 0, i < cnt && res.is(NF), i := i + 1 do
+            var x = gen();
+            -- printf("shrinking: %s\n", x.value.string);
+            if fn (x.value) != ans then 
+                -- printf("failed at shrinked: %s\n", x.value.string);
+                res := tryShrink(x, fn, ans, cnt, d - 1)
+            -- else printf("x = %s f(x) = %d\n", x.value.string, fn(x.value))
+            fi
+        od;
+        case res of NF -> old | _ -> res esac
+    fi
+}
+
+fun runTests(gen, fn, cnt) {
+    var i; for i := 0, i < cnt, i := i + 1 do
+        printf("--- running test %d ---\n", i + 1);
+        let [[test, shrinkGen], ans] = gen () in 
+             if fn (test) == ans then printf("succeed\n") 
+             else printf("failed at: %s\n", test.string); printf("minimal countrexample: %s\n", tryShrink([test, shrinkGen], fn, ans, 10, 5).string ) fi
+    od
+}
+
+fun evaluate(scheme, ctx) {
+    case scheme of 
+        Not (x) -> 1 - evaluate (x, ctx)
+        | And (a, b) -> evaluate (a, ctx) && evaluate (b, ctx)
+        | Or (a, b) -> evaluate (a, ctx) !! evaluate (b, ctx)
+        | Var (x) -> ctx [x]
+    esac
+}
+
+fun pow2 (n) { var r = 1, i; for i := 0, i < n, i := i + 1 do r := r * 2 od; r }
+fun shl (x, n) { x * pow2 (n) }
+fun shr (x, n) { x / pow2 (n) }
+fun runSolver(scheme) {
+    fun solver(scheme, m, iter) {
+
+        if iter >= shl(1, m) then false 
+        else (
+            var ctx = initArray ( m, fun (i) { shr(iter, i) % 2 } );
+            if (evaluate(scheme, ctx)) then true else solver(scheme, m, iter + 1) fi
+        ) fi
+    }
+    let [m, scheme] = squeezeScheme(scheme) in
+    case scheme of Not(x) -> 0 | _ -> solver(scheme, m, 0) esac
+}
+
+fun runSolver2(scheme) {
+    fun solver(scheme, m, iter) {
+
+        if iter >= shl(1, m) then false 
+        else (
+            var ctx = initArray ( m, fun (i) { shr(iter, i) % 2 } );
+            -- printf("ctx %s\n", ctx.string);
+            if (evaluate(scheme, ctx)) then true else solver(scheme, m, iter + 1) fi
+        ) fi
+    }
+    let [m, scheme] = squeezeScheme(scheme) in
+    case scheme of Or(x, Not(y)) -> 0 | _ -> solver(scheme, m, 0) esac
+}
 var satGen = extract $ sized2 (schemeFunctor (chain, fork), schemeFunctor (fork, chain))(10);
 var sat = satGen(0);
-printf("sat src %s\nsat shrinked %s\n", sat.value.string, sat.shrink().value.string)
+
+printf("sat src %s\nsat shrinked %s\n", sat.value.string, sat.shrink().value.string);
+runTests(fun () { [satGen(0), 1] }, runSolver2, 10)
+
