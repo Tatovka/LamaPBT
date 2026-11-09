@@ -1,0 +1,164 @@
+import Random;
+import Array;
+import STM;
+import Collection;
+import Fun;
+
+fun oneof (xs) {
+    var k = xs.length;
+    xs [random(k)]
+}
+
+fun invoke(f) {
+    f ()
+}
+
+fun intGen() {
+  randomInt()
+}
+
+fun strGen(max_len) {
+    fun () {
+        randomString(random(max_len))
+    }
+}
+
+fun noneGen() {
+    None
+}
+
+fun mul(types) {
+    fun () {
+        mapArray(invoke, types)
+    }
+}
+
+fun either(types) {
+    fun () {
+        oneof(types)()
+    }
+}
+
+fun fix(f) {
+    fun () {
+        f (fix(f)) ()
+    } 
+}
+
+fun fix2(f, g) {
+    fun () {
+        f (fix2(f, g), fix2(g, f)) ()
+    } 
+}
+
+fun sized(f) {
+    fun (n) {
+        f (sized(f), n) ()
+    } 
+}
+
+fun sized2(f, g) {
+    fun (n) {
+        f (sized2(f, g), sized2(g, f), n) ()
+    } 
+}
+fun listFunc(f) {
+    fun cons (x, xs) {
+        fun () {
+            Cons (x(), f())
+        }
+    }
+
+    fun nil () {
+        Nil
+    }
+
+    either ([nil, cons(mul([either([intGen, strGen(10)]), noneGen]), f)])
+}
+
+fun schemeFunc (f, n) {
+    fun or (l, r) {
+        fun () {
+            let [n1, n2] = split (n, 2) in Or (l(n1), r(n2))
+        }
+    }
+
+    fun and (l, r) {
+        fun () {
+            let [n1, n2] = split (n, 2) in And (l(n1), r(n2))
+        }
+    }
+
+    fun not (x) {
+        fun () {
+            Not (x(n - 1))
+        }
+    }
+
+    fun variable () {
+        Var (random(10))
+    }
+
+    if n <= 1 then variable else either ([not (f), and (f, f), or (f, f)]) fi
+}
+
+fun tautoFunc (f, g, n) {
+    fun or (l, r) {
+        fun () {
+            let [n1, n2] = split (n, 2) in Or (l(n1), r(n2))
+        }
+    }
+
+    fun and (l, r) {
+        fun () {
+            let [n1, n2] = split (n, 2) in And (l(n1), r(n2))
+        }
+    }
+
+    fun not (x) {
+        fun () {
+            Not (x(n - 1))
+        }
+    }
+
+    fun variable () {
+        var x = Var (random(10));
+        Or (x, Not(x))
+    }
+
+    if n <= 1 then variable else either ([not (g), and (f, f), or (f, f)]) fi
+}
+
+fun unsatFunc (f, g, n) {
+    fun or (l, r) {
+        fun () {
+            let [n1, n2] = split (n, 2) in Or (l(n1), r(n2))
+        }
+    }
+
+    fun and (l, r) {
+        fun () {
+            let [n1, n2] = split (n, 2) in And (l(n1), r(n2))
+        }
+    }
+
+    fun not (x) {
+        fun () {
+            Not (x(n - 1))
+        }
+    }
+
+    fun variable () {
+        var x = Var (random(10));
+        And (x, Not(x))
+    }
+
+    if n <= 1 then variable else either ([not (g), and (f, f), or (f, f)]) fi
+}
+
+var list = fix(listFunc);
+var scheme = sized(schemeFunc);
+
+var unsat = sized2(unsatFunc, tautoFunc);
+
+printf("%s\n", unsat(2).string)

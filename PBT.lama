@@ -1,0 +1,245 @@
+import Random;
+import Array;
+import STM;
+import Collection;
+import Fun;
+
+fun oneof (xs) {
+    var k = xs.length;
+    xs [random(k)]
+}
+
+fun fmap (f, Gen (res, ctx)) {
+    Gen (f (res), ctx)
+}
+
+fun lift2 (f, g) {
+    fun ( Gen (a, b), Gen (c, d) ) { Gen (f (a, b), g (c, d)) }
+}
+
+fun tupled (f) {
+    fun ([x, y]) { f (x, y) }
+}
+
+fun curry (f) {
+    fun (x) { fun (y) {f (x, y)} }
+}
+
+-- fun app (Gen (f, g), Gen (a, b)) {
+--     Gen (f (a), g (b))
+-- }
+fun app ([f, g], [a, b]) {
+    [f (a), g (b)]
+}
+
+fun and (x, y) { And (x, y) }
+fun or (x, y) { Or (x, y) }
+fun not (x) { Not (x) }
+fun max (x, y) { if x > y then x else y fi }
+
+fun value (Gen (x, y)) { x }
+
+
+fun generateSchemeSat (depth, var_n) {
+    fun variable (min_var) { 
+        var inner = min_var + random (var_n); 
+        [inner + 1, Var(inner)]
+    }
+
+    var constructors = [or, and];
+
+    --mode = 0 -> generate satisfaiable scheme
+    --mode = 1 -> generate not tauto sceme
+    fun rec (mode, depth) {
+        if depth <= 1 then
+            variable
+        else (
+            case random (3) of
+                0 -> (
+                    rec(1 - mode, depth - 1) => not
+                )
+                | 1 -> (
+                    fun (st) {
+                        foldrArray (app, [max.curry, constructors[mode].curry], mapArray (fun (d) { rec (mode, d) (st) }, split (depth, 2)))
+                    }
+                )
+                | 2 -> (
+                    var inners = mapArray (rec.curry $ mode, split (depth, 2));
+                    inners[0] =>> fun (l) { inners[1] =>> fun (r) { returnST (constructors[1 - mode] (l, r)) } }
+                )
+            esac
+        )
+        fi
+    }    
+    var res = rec(0, depth) (0);
+    [res[1], 1]
+} 
+
+--mode = 0 -> generate unsatisfaiable scheme
+--mode = 1 -> generate tauto sceme
+fun generateSchemeUnsat (depth, var_n) { --> [scheme, max_var]
+    var constructors = [or, and];
+    fun rec (mode, depth) {
+        fun leaf (_) { 
+            var inner = random (var_n); 
+            [None, constructors[1 - mode] (Var (inner), Not(Var (inner)))]
+        }
+        if depth <= 1 then
+            leaf
+        else (
+            case random (3) of
+                0 -> (
+                    rec(1 - mode, depth - 1) => not
+                )
+                | 1 -> (
+                    var inners = mapArray (rec.curry $ mode, split (depth, 2));
+                    inners[0] =>> fun (l) { inners[1] =>> fun (r) { returnST (constructors[mode] (l, r)) }}
+                )
+                | 2 -> (
+                    var inners = mapArray (rec.curry $ mode, split (depth, 2));
+                    inners[0] =>> fun (l) { inners[1] =>> fun (r) { returnST (constructors[1 - mode] (l, r)) }}
+                )
+            esac
+        )
+        fi
+    }    
+    var res = rec(0, depth) (None);
+    [res[1], 0]
+} 
+
+fun schemeGenerator (leaf, case1, case2, baseState) { 
+    fun (depth, var_n){
+        fun rec (mode, depth) {
+            if depth <= 1 then
+                leaf (mode, var_n)
+            else (
+                case random (3) of
+                    0 -> (
+                        rec (1 - mode, depth - 1) => not
+                    )
+                    | 1 -> (
+                        case1 (mode, depth, rec)
+                    )
+                    | 2 -> (
+                        case2 (mode, depth, rec)
+                    )
+                esac
+            )
+            fi
+        }    
+        var res = rec(0, depth) (baseState);
+        res[1]
+    }
+} 
+
+fun squeezeScheme(scheme) {
+    fun rec(scheme) {
+        case scheme of 
+            Var(x) ->  fun (st@[m, k]) { case findMap(m, x) of Some(y) -> [st, Var (y)] | None -> [[addMap(m, x, k), k + 1], Var(k)] esac }
+            | Not (x) -> rec(x) => not
+            | Or (x, y) -> rec(x) =>> fun (l) { rec (y) =>> fun (r) { returnST (Or (l, r)) }}
+            | And (x, y) -> rec(x) =>> fun (l) { rec (y) =>> fun (r) { returnST (And (l, r)) }}
+        esac
+    }  
+    case rec (scheme) ([emptyMap(fun (x, y) { x - y }), 0]) of 
+        [[_, m], schemeNew] -> [m, schemeNew]
+    esac
+}
+
+
+fun evaluate(scheme, ctx) {
+    case scheme of 
+        Not (x) -> 1 - evaluate (x, ctx)
+        | And (a, b) -> evaluate (a, ctx) && evaluate (b, ctx)
+        | Or (a, b) -> evaluate (a, ctx) !! evaluate (b, ctx)
+        | Var (x) -> ctx [x]
+    esac
+}
+
+fun setValues(scheme, ctx) {
+    case scheme of 
+        Not (x) -> Not (setValues (x, ctx))
+        | And (a, b) -> And (setValues (a, ctx), setValues (b, ctx))
+        | Or (a, b) -> Or (setValues (a, ctx), setValues (b, ctx))
+        | Var (x) -> ctx [x]
+    esac
+}
+
+fun pow2 (n) { var r = 1, i; for i := 0, i < n, i := i + 1 do r := r * 2 od; r }
+fun shl (x, n) { x * pow2 (n) }
+fun shr (x, n) { x / pow2 (n) }
+
+fun runSolver(scheme, m) {
+    fun solver(scheme, m, iter) {
+        if iter >= shl(1, m) then false 
+        else (
+            var ctx = initArray ( m, fun (i) { shr(iter, i) % 2 } );
+            -- printf("ctx %s\n", ctx.string);
+            if (evaluate(scheme, ctx)) then true else solver(scheme, m, iter + 1) fi
+        ) fi
+    }
+    solver(scheme, m, 0)
+}
+
+var constructors = [or, and];
+var generateUnsat = schemeGenerator (
+    --leaf
+    fun (mode, var_n) { fun (_) { 
+        var inner = random (var_n); 
+        [None, constructors[1 - mode] (Var (inner), Not(Var (inner)))] 
+    }},
+    --case1
+    fun (mode, depth, rec) {
+        var inners = mapArray (rec.curry $ mode, split (depth, 2));
+        inners[0] =>> fun (l) { inners[1] =>> fun (r) { returnST (constructors[mode] (l, r)) }}
+    },
+    --case2
+    fun (mode, depth, rec) {
+        var inners = mapArray (rec.curry $ mode, split (depth, 2));
+        inners[0] =>> fun (l) { inners[1] =>> fun (r) { returnST (constructors[1 - mode] (l, r)) }}
+    },
+    --baseState
+    None
+);
+
+var generateSat = schemeGenerator (
+    --leaf
+    fun (mode, var_n) { fun (min_var) { 
+        var inner = min_var + random (var_n); 
+        [inner + 1, Var(inner)]
+    } },
+    --case1
+    fun (mode, depth, rec) {
+        fun (st) {
+            foldrArray (app, [max.curry, constructors[mode].curry], mapArray (fun (d) { rec (mode, d) (st) }, split (depth, 2)))
+        }
+    },
+    --case2
+    fun (mode, depth, rec) {
+        var inners = mapArray (rec.curry $ mode, split (depth, 2));
+        inners[0] =>> fun (l) { inners[1] =>> fun (r) { returnST (constructors[1 - mode] (l, r)) }}
+    },
+    --baseState
+    0
+);
+
+-- var scheme = generateSat (6, 5);
+-- case squeezeScheme(scheme) of
+--     inp@[m, schemeNew] -> printf("%s\n%s", inp.string, runSolver(schemeNew, m).string)
+-- esac
+
+fun runTests(gen, fn, cnt) {
+    var i; for i := 0, i < cnt, i := i + 1 do
+        printf("test %d ", i + 1);
+        case gen () of 
+            [test, ans] -> printf(if fn (test) == ans then "succeed\n" else "failed\n" fi)
+        esac
+    od
+}
+
+
+runTests(
+    fun () { generateSchemeSat (10, 3) }, 
+    fun (scheme) { var sq = squeezeScheme(scheme); runSolver(sq[1], sq[0]) }, 
+    10
+)
