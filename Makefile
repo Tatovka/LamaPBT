@@ -3,7 +3,7 @@ SHELL := /bin/bash
 FILES=$(wildcard *.lama)
 ALL=$(sort $(FILES:.lama=.o))
 LAMAC=lamac
-TARGET=RandomShrinkers
+TARGET=SatSolverTests
 
 all: $(ALL) target
 
@@ -17,5 +17,4 @@ SatSolverTests.o: RandomShrinkers.o
 
 clean:
 	rm -Rf *.s *.o *.i *~
-	pushd regression && make clean && popd
 
